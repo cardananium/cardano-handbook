@@ -43,10 +43,13 @@ graph LR
 ```mermaid
 flowchart TD
     subgraph "1. Submission (GOV rule)"
-        S1[Proposal submitted] --> S2{Parent exists?}
+        S1[Proposal submitted] --> S2{parent == root?}
         S2 -->|Yes| S3[Added to Proposals]
-        S2 -->|No| S4[InvalidPrevGovActionId error]
+        S2 -->|No| S5{parent in Proposals?}
+        S5 -->|Yes| S3
+        S5 -->|No| S4[InvalidPrevGovActionId error]
         style S4 fill:#FF6B6B
+        style S3 fill:#90EE90
     end
 
     subgraph "2. Ratification (RATIFY rule at epoch boundary)"
@@ -54,7 +57,7 @@ flowchart TD
         R2 -->|Yes| R3{Threshold reached?}
         R3 -->|Yes| R4[ENACTED]
         R3 -->|No| R5[Remains in Proposals]
-        R2 -->|No| R6[NOT ratified, will expire]
+        R2 -->|No| R6[Skipped, may expire later]
         style R4 fill:#90EE90
         style R6 fill:#FFD700
     end
@@ -62,9 +65,15 @@ flowchart TD
 
 ### 1. When Proposal is Submitted (GOV rule)
 
-The proposal is added to the Proposals forest. The parent reference is checked to ensure it points to an existing proposal or is the current root.
+The proposal is added to the Proposals forest. The parent reference is validated:
 
-If the parent doesn't exist → `InvalidPrevGovActionId` error.
+```
+Valid if:
+  - parent == currentRoot (Nothing for first action, or last enacted)
+  - OR parent exists in Proposals (points to unratified proposal)
+```
+
+If neither condition is met → `InvalidPrevGovActionId` error, transaction fails.
 
 ### 2. When Proposal is Ratified (RATIFY rule)
 
@@ -80,46 +89,6 @@ If it doesn't match → proposal is NOT ratified (skipped, may expire later).
 
 ## Example: ParameterChange Chain
 
-```mermaid
-sequenceDiagram
-    participant L as Ledger
-    participant P as Proposals
-
-    Note over L: Initial: root = Nothing
-
-    rect rgb(200, 230, 200)
-        Note over L,P: Epoch 1
-        P->>P: A submitted (parent=Nothing)
-        Note over P: A added ✓
-    end
-
-    rect rgb(255, 230, 200)
-        Note over L,P: Epoch boundary 1→2
-        P->>L: A ratified & enacted
-        Note over L: root = A
-        P-->>P: A removed
-    end
-
-    rect rgb(200, 230, 200)
-        Note over L,P: Epoch 2
-        P->>P: B submitted (parent=A)
-        Note over P: B added ✓
-        P->>P: C submitted (parent=Nothing) ⚠️
-        Note over P: C added (syntactically OK)
-    end
-
-    rect rgb(255, 230, 200)
-        Note over L,P: Epoch boundary 2→3
-        Note over P: C: parent(Nothing) ≠ root(A)<br/>NOT ratified!
-        P->>L: B ratified & enacted
-        Note over L: root = B
-        P-->>P: B removed
-        Note over P: C remains, will expire
-    end
-```
-
-### Step-by-step:
-
 **Initial state**: `prevGovActionIds.PParamUpdate = Nothing`
 
 **Epoch 1**:
@@ -129,20 +98,19 @@ sequenceDiagram
 
 **Epoch boundary 1→2**:
 - A ratified, A enacted
-- `prevGovActionIds.PParamUpdate = Just(A)`
+- `prevGovActionIds.PParamUpdate = Just(A)` (root updated)
 - A removed from Proposals
 
 **Epoch 2**:
 - Proposal B submitted: `ParameterChange(parent=Just(A), minFee=200)`
-- Validation: parent(A) exists ✓
-- Proposal C submitted: `ParameterChange(parent=Nothing, minFee=300)` ⚠️
-- Submission OK (Nothing is syntactically valid), but...
+- Validation: parent == root (Just A) ✓
+- Proposal C submitted: `ParameterChange(parent=Nothing, minFee=300)` ❌
+- Validation: parent(Nothing) != root(Just A) → **InvalidPrevGovActionId**
+- **Transaction FAILS, C is never added to Proposals!**
 
 **Epoch boundary 2→3**:
-- C check: `parent(Nothing) != root(Just(A))` → **NOT ratified!**
 - B ratified, B enacted
 - `prevGovActionIds.PParamUpdate = Just(B)`
-- C remains (will eventually expire)
 
 ## Tree Structure of Proposals
 
