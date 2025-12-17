@@ -167,8 +167,9 @@ graph TD
 
 When A is enacted:
 - A becomes the new root
+- A's deposit is returned ✓
 - B (sibling) and all its descendants are **removed** (they're no longer valid)
-- Deposits for removed proposals are returned
+- Deposits for all removed proposals are returned ✓
 
 ```mermaid
 graph TD
@@ -270,11 +271,13 @@ stateDiagram-v2
 
     Ratified --> Enacted: Apply changes
 
-    Enacted --> [*]: Becomes new root
-    Expired --> [*]: Deposit returned
-    Removed --> [*]: Deposit returned
-    Rejected --> [*]: Tx fails
+    Enacted --> [*]: Becomes new root + Deposit returned ✓
+    Expired --> [*]: Deposit returned ✓
+    Removed --> [*]: Deposit returned ✓
+    Rejected --> [*]: Tx fails (deposit never taken)
 ```
+
+**Note**: Deposit is **always returned** when a proposal leaves the Proposals set, regardless of the reason (enacted, expired, or removed due to sibling enactment).
 
 ## Summary
 
@@ -283,4 +286,4 @@ stateDiagram-v2
 3. **4 independent chains** exist (Committee purpose is shared by NoConfidence and UpdateCommittee)
 4. **Parent must match current root** at ratification time
 5. **Siblings are removed** when one of them is enacted
-6. **Deposits are returned** for removed proposals
+6. **Deposits are ALWAYS returned** when proposal is removed (enacted, expired, or sibling enacted)
